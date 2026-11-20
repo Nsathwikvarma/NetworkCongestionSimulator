@@ -37,6 +37,8 @@ export class SimulationEngine {
     this.telemetryHistory = []
     this.maxHistoryPoints = 300
     this.lastTelemetrySampleTime = 0
+    this.lastTelemetrySampleRealTime = Date.now()
+    this.startTimeReal = Date.now()
 
     // Dynamic Bottleneck Tuning
     this.bottleneckBw = options.bottleneckBw || 16 // Mbps
@@ -61,6 +63,9 @@ export class SimulationEngine {
     this.droppedParticles = []
     this.telemetryHistory = []
     this.simTimeMs = 0
+    this.lastTelemetrySampleTime = 0
+    this.lastTelemetrySampleRealTime = Date.now()
+    this.startTimeReal = Date.now()
 
     // Initialize Nodes
     this.topology.nodes.forEach(node => {
@@ -110,6 +115,11 @@ export class SimulationEngine {
       controller.flowColor = host.flowColor || '#00f0ff'
       this.flows.set(host.id, controller)
     })
+
+    // Seed initial baseline telemetry points so graphs display immediately
+    for (let i = 0; i < 4; i++) {
+      this.sampleTelemetry()
+    }
   }
 
   // Dijkstra / Shortest Path finding for routing
@@ -310,10 +320,12 @@ export class SimulationEngine {
     // 3. Update Visual Explosion / Drop Particles
     this.updateDroppedParticles(effectiveDelta)
 
-    // 4. Sample Telemetry for Real-time Graphs
-    if (this.simTimeMs - this.lastTelemetrySampleTime >= 400) {
+    // 4. Sample Telemetry for Real-time Graphs (sample frequently and in real-time)
+    const now = Date.now()
+    if (this.simTimeMs - this.lastTelemetrySampleTime >= 150 || (now - (this.lastTelemetrySampleRealTime || 0)) >= 250) {
       this.sampleTelemetry()
       this.lastTelemetrySampleTime = this.simTimeMs
+      this.lastTelemetrySampleRealTime = now
     }
 
     // 5. Notify renderers
@@ -467,8 +479,12 @@ export class SimulationEngine {
     const queueDepth = bottleneckQ ? bottleneckQ.packets.length : 0
     const queueMax = bottleneckQ ? bottleneckQ.capacity : 25
 
+    const elapsedRealSec = Number(((Date.now() - (this.startTimeReal || Date.now())) / 1000).toFixed(1))
+    const simSec = Number((this.simTimeMs / 1000).toFixed(1))
+    const displayTime = this.speed >= 0.5 ? simSec : elapsedRealSec
+
     const point = {
-      time: Number((this.simTimeMs / 1000).toFixed(1)),
+      time: displayTime,
       cwnd: Number((aggregateCwnd / Math.max(1, activeFlowCount)).toFixed(2)),
       throughput: Number(aggregateThpt.toFixed(2)),
       rtt: Number(avgRtt.toFixed(1)),

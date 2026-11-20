@@ -181,7 +181,7 @@ export default function App() {
 
   const engine = engineRef.current
   const inFlightCount = engine?.packets?.length || 0
-  const history = engine?.telemetryHistory || []
+  const history = engine?.telemetryHistory ? [...engine.telemetryHistory] : []
   const latestTelemetry = history.length > 0 ? history[history.length - 1] : {}
 
   // Active packet for Demonstration ticker

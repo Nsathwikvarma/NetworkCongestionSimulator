@@ -44,22 +44,27 @@ export default function TelemetryCharts({ history = [], currentAlgo = 'TCP Reno'
     const cutoff = Math.max(0, latestTime - seconds)
     const sliced = history.filter(d => (d.time || 0) >= cutoff)
     return sliced.length >= 2 ? sliced : history.slice(-Math.min(history.length, seconds * 2))
-  }, [history, timeWindow])
+  }, [history, history?.length, timeWindow])
 
-  if (!filteredHistory || filteredHistory.length < 2) {
-    return (
-      <div className={`w-full h-full flex flex-col items-center justify-center p-6 rounded-xl border ${
-        isDark ? 'bg-slate-950/60 border-slate-800 text-slate-400' : 'bg-white border-slate-200 text-slate-600'
-      }`}>
-        <Activity size={28} className="animate-pulse text-cyan-500 mb-2" />
-        <span className="text-sm font-semibold">Collecting live telemetry stream...</span>
-        <span className="text-xs text-slate-400 mt-1">Packets in transit will populate the live graph shortly</span>
-      </div>
-    )
-  }
+  // Ensure there are always points to display so graph is immediately active
+  const displayHistory = React.useMemo(() => {
+    if (!filteredHistory || filteredHistory.length === 0) {
+      return [
+        { time: 0, cwnd: 2, throughput: 0.5, rtt: 35, queueOccupancy: 0 },
+        { time: 0.5, cwnd: 2, throughput: 0.5, rtt: 35, queueOccupancy: 0 }
+      ]
+    }
+    if (filteredHistory.length === 1) {
+      return [
+        { ...filteredHistory[0], time: Math.max(0, (filteredHistory[0].time || 0) - 0.5) },
+        filteredHistory[0]
+      ]
+    }
+    return filteredHistory
+  }, [filteredHistory])
 
-  const latest = filteredHistory[filteredHistory.length - 1]
-  const hoveredPoint = hoverIndex !== null && filteredHistory[hoverIndex] ? filteredHistory[hoverIndex] : latest
+  const latest = displayHistory[displayHistory.length - 1]
+  const hoveredPoint = hoverIndex !== null && displayHistory[hoverIndex] ? displayHistory[hoverIndex] : latest
 
   // Chart Layout Padding & Plots
   const padding = { top: 15, right: 30, bottom: 25, left: 45 }
@@ -67,17 +72,17 @@ export default function TelemetryCharts({ history = [], currentAlgo = 'TCP Reno'
   const plotHeight = Math.max(60, dims.height - padding.top - padding.bottom)
 
   // Auto-Adjusting Y-axis scales
-  const maxCwnd = autoScale ? Math.max(8, ...filteredHistory.map(d => d.cwnd || 0)) * 1.15 : 64
-  const maxThpt = autoScale ? Math.max(10, ...filteredHistory.map(d => d.throughput || 0)) * 1.15 : 100
-  const maxRtt = autoScale ? Math.max(40, ...filteredHistory.map(d => d.rtt || 0)) * 1.15 : 200
+  const maxCwnd = autoScale ? Math.max(8, ...displayHistory.map(d => d.cwnd || 0)) * 1.15 : 64
+  const maxThpt = autoScale ? Math.max(10, ...displayHistory.map(d => d.throughput || 0)) * 1.15 : 100
+  const maxRtt = autoScale ? Math.max(40, ...displayHistory.map(d => d.rtt || 0)) * 1.15 : 200
   const maxQueue = 100
 
-  const getX = (idx) => padding.left + (idx / Math.max(1, filteredHistory.length - 1)) * plotWidth
-  const getY = (val, maxVal) => padding.top + plotHeight - (Math.min(maxVal, Math.max(0, val)) / maxVal) * plotHeight
+  const getX = (idx) => padding.left + (idx / Math.max(1, displayHistory.length - 1)) * plotWidth
+  const getY = (val, maxVal) => padding.top + plotHeight - (Math.min(maxVal, Math.max(0, val)) / Math.max(1, maxVal)) * plotHeight
 
   // Path generator
   const makePath = (dataKey, maxVal) => {
-    return filteredHistory.reduce((acc, pt, i) => {
+    return displayHistory.reduce((acc, pt, i) => {
       const x = getX(i)
       const y = getY(pt[dataKey] || 0, maxVal)
       return i === 0 ? `M ${x.toFixed(1)} ${y.toFixed(1)}` : `${acc} L ${x.toFixed(1)} ${y.toFixed(1)}`
@@ -88,7 +93,7 @@ export default function TelemetryCharts({ history = [], currentAlgo = 'TCP Reno'
     const rect = e.currentTarget.getBoundingClientRect()
     const mouseX = e.clientX - rect.left - padding.left
     const ratio = Math.max(0, Math.min(1, mouseX / plotWidth))
-    const index = Math.round(ratio * (filteredHistory.length - 1))
+    const index = Math.round(ratio * (displayHistory.length - 1))
     setHoverIndex(index)
   }
 
@@ -335,7 +340,7 @@ export default function TelemetryCharts({ history = [], currentAlgo = 'TCP Reno'
             fontSize="10"
             fontFamily="monospace"
           >
-            {filteredHistory[0]?.time}s
+            {displayHistory[0]?.time}s
           </text>
           <text
             x={dims.width - padding.right}
