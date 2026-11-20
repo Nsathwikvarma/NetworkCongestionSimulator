@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && powershell -Command \"Set-Location dist ; git init ; git checkout -b gh-pages ; git add -A ; git commit -m 'Deploy build' ; git remote add origin https://github.com/Nsathwikvarma/NetworkCongestionSimulator.git ; git push -f origin gh-pages ; Remove-Item -Recurse -Force .git ; Set-Location ..\""
   },
   "dependencies": {
     "lucide-react": "^1.73.0",
