@@ -13,6 +13,7 @@ export default function PacketCustomizerModal({ engine, isOpen, onClose, isDark 
   const [sizeBytes, setSizeBytes] = useState(1460)
   const [packetCount, setPacketCount] = useState(1)
   const [flowColor, setFlowColor] = useState('#059669')
+  const [forceDrop, setForceDrop] = useState(false)
   const [statusMessage, setStatusMessage] = useState('')
   const [statusType, setStatusType] = useState('success') // 'success' | 'error'
 
@@ -56,14 +57,19 @@ export default function PacketCustomizerModal({ engine, isOpen, onClose, isDark 
       protocol,
       sizeBytes: Number(sizeBytes),
       count: Number(packetCount),
-      flowColor,
+      flowColor: forceDrop ? '#ef4444' : flowColor,
       srcIp,
-      dstIp
+      dstIp,
+      forceDrop
     })
 
     if (res.success) {
       setStatusType('success')
-      setStatusMessage(`Dispatched ${packetCount} ${protocol} envelope(s) from ${selectedSrcNode?.name} to ${selectedDstNode?.name}!`)
+      setStatusMessage(
+        forceDrop
+          ? `Dispatched ${packetCount} envelope(s) flagged for INTENTIONAL DROP! Watch for explosion burst.`
+          : `Dispatched ${packetCount} ${protocol} envelope(s) from ${selectedSrcNode?.name} to ${selectedDstNode?.name}!`
+      )
       setTimeout(() => {
         setStatusMessage('')
         onClose()
@@ -268,14 +274,40 @@ export default function PacketCustomizerModal({ engine, isOpen, onClose, isDark 
             </div>
           </div>
 
+          {/* 7. Intentional Loss / Force Drop Option */}
+          <div className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition ${
+            forceDrop
+              ? (isDark ? 'bg-red-950/60 border-red-500/60 text-red-200' : 'bg-red-50 border-red-300 text-red-900')
+              : (isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-700')
+          }`}
+          onClick={() => setForceDrop(!forceDrop)}
+          >
+            <div>
+              <div className="font-bold flex items-center gap-1.5 text-xs text-red-600">
+                <span>💥 Simulate Packet Loss (Intentional Drop)</span>
+              </div>
+              <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                Envelope will drop at intermediate bottleneck router and log to Lost Packets Ledger
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              checked={forceDrop}
+              onChange={(e) => setForceDrop(e.target.checked)}
+              className="w-4 h-4 accent-red-600 cursor-pointer"
+            />
+          </div>
+
           {/* Action Button */}
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition"
+              className={`w-full py-2.5 rounded-lg text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition ${
+                forceDrop ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'
+              }`}
             >
               <Send size={15} />
-              <span>DISPATCH PDU ENVELOPE INTO NETWORK</span>
+              <span>{forceDrop ? '💥 DISPATCH & FORCE DROP PACKET (SIMULATE LOSS)' : 'DISPATCH PDU ENVELOPE INTO NETWORK'}</span>
             </button>
           </div>
         </form>

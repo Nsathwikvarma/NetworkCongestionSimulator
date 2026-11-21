@@ -29,6 +29,14 @@ export default function NetworkCanvas({
   const [hoveredPacket, setHoveredPacket] = useState(null)
   const [hoveredLink, setHoveredLink] = useState(null)
   const [mouseWorldPos, setMouseWorldPos] = useState({ x: 0, y: 0 })
+  const [canvasToast, setCanvasToast] = useState(null)
+
+  const showToast = (message, type = 'info') => {
+    setCanvasToast({ message, type })
+    setTimeout(() => {
+      setCanvasToast(null)
+    }, 4000)
+  }
 
   // Handle Resize & Canvas Initialization
   useEffect(() => {
@@ -242,6 +250,7 @@ export default function NetworkCanvas({
     if (activeTool === 'CONNECT' && hoveredNode) {
       if (!cableSourceNode) {
         setCableSourceNode(hoveredNode)
+        showToast(`🔌 Selected ${hoveredNode.name}. Click another device to connect cable!`, 'info')
       } else {
         if (cableSourceNode.id !== hoveredNode.id) {
           engine.addLink(cableSourceNode.id, hoveredNode.id, {
@@ -249,6 +258,7 @@ export default function NetworkCanvas({
             delay: 5,
             isBottleneckLink: false
           })
+          showToast(`✅ Cable connected: ${cableSourceNode.name} ⟷ ${hoveredNode.name}`, 'success')
         }
         setCableSourceNode(null)
       }
@@ -259,9 +269,10 @@ export default function NetworkCanvas({
     if (activeTool === 'SIMPLE_PDU' && hoveredNode) {
       if (!pduSourceNode) {
         setPduSourceNode(hoveredNode)
+        showToast(`✉️ Source device: ${hoveredNode.name}. Click any destination device to send envelope!`, 'info')
       } else {
         if (pduSourceNode.id !== hoveredNode.id) {
-          engine.injectCustomPacket({
+          const res = engine.injectCustomPacket({
             srcNodeId: pduSourceNode.id,
             dstNodeId: hoveredNode.id,
             protocol: 'TCP',
@@ -269,6 +280,11 @@ export default function NetworkCanvas({
             count: 1,
             flowColor: '#10b981'
           })
+          if (res.success) {
+            showToast(`✉️ Dispatched packet: ${pduSourceNode.name} ➔ ${hoveredNode.name}!`, 'success')
+          } else {
+            showToast(`⚠️ ${res.error || 'Failed to send packet'}`, 'error')
+          }
         }
         setPduSourceNode(null)
       }
@@ -335,6 +351,21 @@ export default function NetworkCanvas({
         ctx.restore()
       }
 
+      // Draw In-Progress Rubber Band Envelope (Simple PDU Tool)
+      if (activeTool === 'SIMPLE_PDU' && pduSourceNode) {
+        ctx.save()
+        ctx.strokeStyle = '#10b981'
+        ctx.lineWidth = 2.5
+        ctx.setLineDash([5, 4])
+        ctx.beginPath()
+        ctx.moveTo(pduSourceNode.x, pduSourceNode.y)
+        ctx.lineTo(mouseWorldPos.x, mouseWorldPos.y)
+        ctx.stroke()
+        ctx.font = '20px sans-serif'
+        ctx.fillText('✉️', mouseWorldPos.x + 8, mouseWorldPos.y - 8)
+        ctx.restore()
+      }
+
       // Draw Packet Envelopes (Cisco Packet Tracer Envelopes ✉️)
       drawPacketEnvelopes(ctx, engine, hoveredPacket, isDark)
 
@@ -365,6 +396,27 @@ export default function NetworkCanvas({
       onClick={handleClick}
     >
       <canvas ref={canvasRef} className="w-full h-full block" />
+
+      {/* 📢 Canvas Floating Toast Message */}
+      {canvasToast && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 animate-in fade-in slide-in-from-top duration-200">
+          <div className={`px-4 py-2 rounded-xl shadow-xl font-mono text-xs font-bold flex items-center gap-2 border ${
+            canvasToast.type === 'error'
+              ? 'bg-red-50 border-red-300 text-red-800'
+              : canvasToast.type === 'success'
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+              : 'bg-cyan-50 border-cyan-300 text-cyan-800'
+          }`}>
+            <span>{canvasToast.message}</span>
+            <button
+              onClick={() => setCanvasToast(null)}
+              className="ml-2 text-slate-400 hover:text-slate-700"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 🧭 ON-CANVAS NAVIGATION & SCROLL BUTTONS ("Scroll Buttons") */}
       <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">

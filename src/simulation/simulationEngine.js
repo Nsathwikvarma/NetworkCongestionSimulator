@@ -35,6 +35,7 @@ export class SimulationEngine {
 
     // Global Telemetry Log for Charts & Reporting
     this.telemetryHistory = []
+    this.lostPackets = [] // Global Ledger of all dropped / lost packets
     this.maxHistoryPoints = 300
     this.lastTelemetrySampleTime = 0
     this.lastTelemetrySampleRealTime = Date.now()
@@ -62,6 +63,7 @@ export class SimulationEngine {
     this.packets = []
     this.droppedParticles = []
     this.telemetryHistory = []
+    this.lostPackets = []
     this.simTimeMs = 0
     this.lastTelemetrySampleTime = 0
     this.lastTelemetrySampleRealTime = Date.now()
@@ -277,6 +279,12 @@ export class SimulationEngine {
         pkt.ttl = Math.max(0, pkt.ttl - 1)
         this.recordNodeIpTraffic(v, pkt.srcIp, pkt.dstIp, 'IN', pkt.sizeBytes)
 
+        // Check if packet was flagged for intentional drop
+        if (pkt.forceDrop || pkt.forceDropAt === v) {
+          this.dropPacket(pkt, v, 'MANUAL_FORCED_DROP')
+          continue
+        }
+
         if (pkt.ttl <= 0) {
           this.dropPacket(pkt, v, 'TTL_EXPIRED')
           continue
@@ -386,6 +394,33 @@ export class SimulationEngine {
         // Handle retransmit on loss
         flow.onTimeout(this.simTimeMs)
       }
+    }
+
+    // Record drop in global lostPackets ledger
+    const srcNodeObj = this.nodeMap.get(pkt.srcNode)
+    const dstNodeObj = this.nodeMap.get(pkt.dstNode)
+    const lostEntry = {
+      id: pkt.id || `drop_${Date.now()}`,
+      timeSec: Number((this.simTimeMs / 1000).toFixed(2)),
+      wallTime: new Date().toLocaleTimeString(),
+      srcNode: pkt.srcNode,
+      srcNodeName: srcNodeObj?.name || pkt.srcNode,
+      dstNode: pkt.dstNode,
+      dstNodeName: dstNodeObj?.name || pkt.dstNode,
+      srcIp: pkt.srcIp,
+      dstIp: pkt.dstIp,
+      protocol: pkt.protocol || 'TCP',
+      seq: pkt.seq || 1,
+      sizeBytes: pkt.sizeBytes || 1460,
+      dropNodeId: atNodeId,
+      dropNodeName: node?.name || atNodeId,
+      reason: reason,
+      flowColor: pkt.flowColor || '#ef4444',
+      pduLayers: pkt.pduLayers || null
+    }
+    this.lostPackets.unshift(lostEntry)
+    if (this.lostPackets.length > 300) {
+      this.lostPackets.pop()
     }
 
     // Record drop in node stats
@@ -532,6 +567,71 @@ export class SimulationEngine {
       }
       this.packets.push(burstPkt)
     }
+  }
+
+  // Generate Lost Packet on demand (Single Packet)
+  forceDropNextPacket(reason = 'MANUAL_FORCED_DROP') {
+    // 1. If any in-flight data packet exists, drop it
+    const dataPktIndex = this.packets.findIndex(p => !p.isAck)
+    if (dataPktIndex !== -1) {
+      const pkt = this.packets[dataPktIndex]
+      this.packets.splice(dataPktIndex, 1)
+      const atNode = pkt.queuedAtRouter || pkt.path[pkt.hopIndex + 1] || pkt.path[pkt.hopIndex] || this.topology.nodes[0]?.id
+      this.dropPacket(pkt, atNode, reason)
+      this.notifyTick()
+      return { success: true, packet: pkt, dropNode: atNode }
+    }
+
+    // 2. If any ACK exists, drop that
+    if (this.packets.length > 0) {
+      const pkt = this.packets.shift()
+      const atNode = pkt.path[pkt.hopIndex + 1] || pkt.path[pkt.hopIndex] || this.topology.nodes[0]?.id
+      this.dropPacket(pkt, atNode, reason)
+      this.notifyTick()
+      return { success: true, packet: pkt, dropNode: atNode }
+    }
+
+    // 3. Synthesize and drop immediately at first router / bottleneck
+    const nodes = this.topology.nodes
+    if (nodes.length >= 2) {
+      const src = nodes.find(n => n.type === 'host') || nodes[0]
+      const dst = nodes.find(n => n.type === 'server') || nodes[nodes.length - 1]
+      const path = this.findPath(src.id, dst.id) || [src.id, dst.id]
+      const dropNode = path[1] || path[0]
+      const syntheticPkt = {
+        id: `forced_drop_${this.nextPacketId++}`,
+        flowId: src.id,
+        flowColor: '#ef4444',
+        srcNode: src.id,
+        dstNode: dst.id,
+        srcIp: src.ip,
+        dstIp: dst.ip,
+        protocol: 'TCP',
+        seq: Math.floor(Math.random() * 50) + 1,
+        sizeBytes: 1460,
+        ttl: 64,
+        path: path,
+        hopIndex: 0
+      }
+      this.dropPacket(syntheticPkt, dropNode, reason)
+      this.notifyTick()
+      return { success: true, packet: syntheticPkt, dropNode }
+    }
+
+    return { success: false, error: 'No devices connected on the network.' }
+  }
+
+  // Force Burst Packet Loss (5 packets)
+  forceDropBurst(count = 5, reason = 'BUFFER_OVERFLOW') {
+    for (let i = 0; i < count; i++) {
+      this.forceDropNextPacket(reason)
+    }
+  }
+
+  // Clear Lost Packets History
+  clearLostPackets() {
+    this.lostPackets = []
+    this.notifyTick()
   }
 
   // Toggle link status (simulate fiber cut or link flap)
@@ -787,14 +887,22 @@ export class SimulationEngine {
   }
 
   injectCustomPacket(options) {
-    const { srcNodeId, dstNodeId, protocol = 'TCP', sizeBytes = 1460, count = 1, flowColor = '#10b981', srcIp, dstIp } = options
+    const {
+      srcNodeId, dstNodeId, protocol = 'TCP', sizeBytes = 1460, count = 1,
+      flowColor = '#10b981', srcIp, dstIp, forceDrop = false, dropAtNodeId = null
+    } = options
     const srcNode = this.nodeMap.get(srcNodeId)
     const dstNode = this.nodeMap.get(dstNodeId)
     if (!srcNode || !dstNode) return { success: false, error: 'Source or destination device not found.' }
 
-    const path = this.findPath(srcNodeId, dstNodeId)
+    let path = this.findPath(srcNodeId, dstNodeId)
     if (!path || path.length < 2) {
-      return { success: false, error: `No active network path between ${srcNode.name} and ${dstNode.name}. Connect them with a cable first!` }
+      const direct = this.getLinkBetween(srcNodeId, dstNodeId)
+      if (direct) {
+        path = [srcNodeId, dstNodeId]
+      } else {
+        return { success: false, error: `No active network cable connects ${srcNode.name} and ${dstNode.name}. Connect them with a cable first!` }
+      }
     }
 
     const firstLink = this.getLinkBetween(path[0], path[1])
@@ -805,7 +913,7 @@ export class SimulationEngine {
       const pdu = {
         id: pktId,
         flowId: srcNodeId,
-        flowColor: flowColor,
+        flowColor: forceDrop ? '#ef4444' : flowColor,
         srcNode: srcNodeId,
         dstNode: dstNodeId,
         srcIp: srcIp || srcNode.ip,
@@ -823,6 +931,8 @@ export class SimulationEngine {
         linkTransitTimeMs: linkDelay * 4,
         queuedAtRouter: null,
         sendTimestamp: this.simTimeMs,
+        forceDrop: forceDrop,
+        forceDropAt: dropAtNodeId || (forceDrop ? (path[1] || path[0]) : null),
         pduLayers: {
           layer1: { inPort: 'FastEthernet0/1', outPort: 'FastEthernet0/1', physicalSpeed: `${firstLink?.bandwidth || 100} Mbps` },
           layer2: {

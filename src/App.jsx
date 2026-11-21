@@ -14,6 +14,7 @@ import FileComparatorReportModal from './components/FileComparatorReportModal'
 import CiscoDevicePalette from './components/CiscoDevicePalette'
 import PacketCustomizerModal from './components/PacketCustomizerModal'
 import PduInspectorModal from './components/PduInspectorModal'
+import LostPacketsModal from './components/LostPacketsModal'
 
 export default function App() {
   const [topologyKey, setTopologyKey] = useState('DUMBBELL_CLASSIC')
@@ -39,6 +40,7 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState(null)
   const [inspectingPacket, setInspectingPacket] = useState(null)
   const [showCustomPduModal, setShowCustomPduModal] = useState(false)
+  const [showLostPacketsModal, setShowLostPacketsModal] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
   const [showSettingsDrawer, setShowSettingsDrawer] = useState(false)
   const [showTelemetryDock, setShowTelemetryDock] = useState(true)
@@ -182,7 +184,27 @@ export default function App() {
   const engine = engineRef.current
   const inFlightCount = engine?.packets?.length || 0
   const history = engine?.telemetryHistory ? [...engine.telemetryHistory] : []
+  const lostPackets = engine?.lostPackets ? [...engine.lostPackets] : []
   const latestTelemetry = history.length > 0 ? history[history.length - 1] : {}
+
+  // Force Drop & Packet Loss Handlers
+  const handleForceDropPacket = () => {
+    if (engineRef.current) {
+      engineRef.current.forceDropNextPacket('MANUAL_FORCED_DROP')
+    }
+  }
+
+  const handleForceBurstDrop = (count = 5) => {
+    if (engineRef.current) {
+      engineRef.current.forceDropBurst(count, 'BUFFER_OVERFLOW')
+    }
+  }
+
+  const handleClearLostPackets = () => {
+    if (engineRef.current) {
+      engineRef.current.clearLostPackets()
+    }
+  }
 
   // Active packet for Demonstration ticker
   const activePkt = engine?.packets?.[0] || null
@@ -369,6 +391,20 @@ export default function App() {
             <SlidersHorizontal size={15} />
           </button>
 
+          {/* Lost Packets Ledger Button */}
+          <button
+            onClick={() => setShowLostPacketsModal(true)}
+            className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition shadow border ${
+              lostPackets.length > 0
+                ? 'bg-red-600 hover:bg-red-500 text-white border-red-500 animate-pulse'
+                : (isDark ? 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800' : 'bg-slate-50 border-slate-300 text-slate-700 hover:bg-slate-200')
+            }`}
+            title="Open Lost Packets Cemetery & Drop Inspector"
+          >
+            <span>💥</span>
+            <span>Lost Packets: {lostPackets.length}</span>
+          </button>
+
           {/* Compare Report Modal Button */}
           <button
             onClick={() => setShowReportModal(true)}
@@ -487,6 +523,38 @@ export default function App() {
           >
             <span>✉️</span>
             <span>Send Demo Packet</span>
+          </button>
+
+          {/* Force Drop Packet (Generate Loss) */}
+          <button
+            onClick={handleForceDropPacket}
+            className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-bold text-[11px] flex items-center gap-1 shadow-sm transition active:scale-95"
+            title="Generate packet loss! Force drops the next packet in flight or at router"
+          >
+            <span>💥</span>
+            <span>Drop Packet</span>
+          </button>
+
+          {/* Burst Drop (5 Packets) */}
+          <button
+            onClick={() => handleForceBurstDrop(5)}
+            className="px-2.5 py-1 rounded bg-red-800 hover:bg-red-700 text-white font-bold text-[11px] flex items-center gap-1 shadow-sm transition active:scale-95 hidden lg:flex"
+            title="Force drop 5 packets in a row to simulate severe buffer overflow"
+          >
+            <span>💥</span>
+            <span>Burst (5 Drops)</span>
+          </button>
+
+          {/* Custom PDU Button */}
+          <button
+            onClick={() => setShowCustomPduModal(true)}
+            className={`px-2.5 py-1 rounded border text-[11px] font-bold flex items-center gap-1 transition ${
+              isDark ? 'bg-slate-900 border-slate-700 text-slate-200 hover:bg-slate-800' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+            }`}
+            title="Craft and send custom packets from any device to any device"
+          >
+            <span>🛠️</span>
+            <span>Custom PDU</span>
           </button>
 
           {/* Speed Presets */}
@@ -748,6 +816,20 @@ export default function App() {
         <FileComparatorReportModal
           engine={engine}
           onClose={() => setShowReportModal(false)}
+          isDark={isDark}
+        />
+      )}
+
+      {/* Lost Packets Cemetery & Drop Ledger Modal */}
+      {showLostPacketsModal && (
+        <LostPacketsModal
+          isOpen={showLostPacketsModal}
+          onClose={() => setShowLostPacketsModal(false)}
+          lostPackets={lostPackets}
+          onClear={handleClearLostPackets}
+          onForceDrop={handleForceDropPacket}
+          onForceBurst={handleForceBurstDrop}
+          onInspectPacket={(pkt) => setInspectingPacket(pkt)}
           isDark={isDark}
         />
       )}
